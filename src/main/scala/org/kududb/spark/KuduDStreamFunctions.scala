@@ -50,7 +50,7 @@ object KuduDStreamFunctions {
      */
     def kuduForeachPartition(kc: KuduContext,
                               f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit): Unit = {
-      kc.streamForeachPartition(dStream, f)
+      KuduContext.streamForeachPartition(kc,dStream, f)
     }
 
     /**

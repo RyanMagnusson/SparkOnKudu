@@ -52,7 +52,7 @@ object KuduRDDFunctions
      */
     def hbaseForeachPartition(kc: KuduContext,
                               f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit): Unit = {
-      KuduContext.foreachPartition(kc.broadcastedKuduMaster,rdd, f)
+      KuduContext.foreachPartition(kc,rdd, f)
     }
 
     /**
