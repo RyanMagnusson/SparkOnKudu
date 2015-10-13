@@ -34,7 +34,7 @@ object KuduDStreamFunctions {
    * @param dStream  This is for dStreams of any type
    * @tparam T       Type T
    */
-  implicit class GenericKuduDStreamFunctions[T](val dStream: DStream[T]) {
+  implicit class GenericKuduDStreamFunctions[T](val dStream: DStream[T]) extends Serializable {
 
 
     /**

@@ -207,7 +207,7 @@ object MeetupEventAggregatesSparkStreaming {
                                                response,
                                                latitude, longitude,
                                                venueID, venueName,
-                                               visibility);
+                                               visibility)
       (row.getString(0),initialMeetupEvent)
     })
 

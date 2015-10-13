@@ -27,6 +27,7 @@ import scala.reflect.ClassTag
 import org.apache.spark.{Logging, SparkContext}
 import org.apache.spark.streaming.dstream.DStream
 import java.io._
+import org.apache.spark.broadcast.Broadcast
 
 /**
   * HBaseContext is a façade for HBase operations
@@ -37,7 +38,7 @@ import java.io._
   * to the working and managing the life cycle of HConnections.
  */
 class KuduContext(@transient sc: SparkContext,
-                   @transient kuduMaster: String)
+                  @transient kuduMaster: String)
   extends Serializable with Logging {
 
   val broadcastedKuduMaster = sc.broadcast(kuduMaster)
@@ -60,7 +61,7 @@ class KuduContext(@transient sc: SparkContext,
   def foreachPartition[T](rdd: RDD[T],
                           f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
     rdd.foreachPartition(
-      it => kuduForeachPartition(it, f))
+      it => KuduContext.broadcastedKuduForeachPartition(broadcastedKuduMaster, it, f))
   }
 
   /**
@@ -159,9 +160,6 @@ class KuduContext(@transient sc: SparkContext,
       f))
   }
 
-
-
-
   def kuduRDD(tableName: String, columnProjection: String = null):
   RDD[(NullWritable, RowResult)] = {
 
@@ -181,7 +179,7 @@ class KuduContext(@transient sc: SparkContext,
   /**
    *  underlining wrapper all foreach functions in HBaseContext
    */
-  private def kuduForeachPartition[T](it: Iterator[T],
+  def kuduForeachPartition[T](it: Iterator[T],
                                         f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
     f(it, KuduClientCache.getKuduClient(broadcastedKuduMaster.value),
     KuduClientCache.getAsyncKuduClient(broadcastedKuduMaster.value))
@@ -194,8 +192,6 @@ class KuduContext(@transient sc: SparkContext,
   private def kuduMapPartition[K, U](it: Iterator[K],
                                      mp: (Iterator[K], KuduClient, AsyncKuduClient) =>
                                          Iterator[U]): Iterator[U] = {
-
-    
     val res = mp(it,
       KuduClientCache.getKuduClient(broadcastedKuduMaster.value),
       KuduClientCache.getAsyncKuduClient(broadcastedKuduMaster.value))
@@ -244,6 +240,26 @@ class KuduContext(@transient sc: SparkContext,
   def fakeClassTag[T]: ClassTag[T] = ClassTag.AnyRef.asInstanceOf[ClassTag[T]]
 }
 
+object KuduContext {
+  /**
+   *  underlining wrapper all foreach functions in HBaseContext
+   */
+  def broadcastedKuduForeachPartition[T](broadcastedKuduMaster:Broadcast[String], 
+                              it: Iterator[T],
+                              f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
+    val master = broadcastedKuduMaster.value
+    kuduForeachPartition(master, it, f)
+  }
+  
+  def kuduForeachPartition[T](kuduMaster:String, 
+                              it: Iterator[T],
+                              f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
+    f(it, KuduClientCache.getKuduClient(kuduMaster),
+    KuduClientCache.getAsyncKuduClient(kuduMaster))
+  }
+}
+
+
 object LatestKuduContextCache {
   var latest:KuduContext = null
 }
@@ -271,3 +287,5 @@ object KuduClientCache {
   }
 
 }
+
+
