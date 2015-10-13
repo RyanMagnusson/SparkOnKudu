@@ -64,25 +64,7 @@ class KuduContext(@transient sc: SparkContext,
 //      it => KuduContext.broadcastedKuduForeachPartition(broadcastedKuduMaster, it, f))
 //  }
 
-  /**
-   * A simple enrichment of the traditional Spark Streaming dStream foreach
-   * This function differs from the original in that it offers the
-   * developer access to a already connected HConnection object
-   *
-   * Note: Do not close the HConnection object.  All HConnection
-   * management is handled outside this method
-   *
-   * @param dstream  Original DStream with data to iterate over
-   * @param f        Function to be given a iterator to iterate through
-   *                 the DStream values and a HConnection object to
-   *                 interact with HBase
-   */
-  def foreachPartition[T](dstream: DStream[T],
-                    f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
-    dstream.foreachRDD((rdd, time) => {
-      KuduContext.foreachPartition(this,rdd, f)
-    })
-  }
+
 
   /**
    * A simple enrichment of the traditional Spark RDD mapPartition.
@@ -161,29 +143,27 @@ class KuduContext(@transient sc: SparkContext,
   }
 
   def kuduRDD(tableName: String, columnProjection: String = null):
-  RDD[(NullWritable, RowResult)] = {
+      RDD[(NullWritable, RowResult)] = {
+            val conf = new Configuration
+            conf.set("kudu.mapreduce.master.address",kuduMaster)
+            conf.set("kudu.mapreduce.input.table", tableName)
+            if (columnProjection != null) {
+              conf.set("kudu.mapreduce.column.projection", columnProjection)
+            }
 
-    val conf = new Configuration
-    conf.set("kudu.mapreduce.master.address",kuduMaster)
-    conf.set("kudu.mapreduce.input.table", tableName)
-    if (columnProjection != null) {
-      conf.set("kudu.mapreduce.column.projection", columnProjection)
-    }
-
-    val rdd = sc.newAPIHadoopRDD(conf, classOf[KuduTableInputFormat], classOf[NullWritable], classOf[RowResult])
-
-    rdd
+            val rdd = sc.newAPIHadoopRDD(conf, classOf[KuduTableInputFormat], classOf[NullWritable], classOf[RowResult])
+            rdd
   }
 
 
-  /**
-   *  underlining wrapper all foreach functions in HBaseContext
-   */
-  def kuduForeachPartition[T](it: Iterator[T],
-                                        f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
-    f(it, KuduClientCache.getKuduClient(broadcastedKuduMaster.value),
-    KuduClientCache.getAsyncKuduClient(broadcastedKuduMaster.value))
-  }
+//  /**
+//   *  underlining wrapper all foreach functions in HBaseContext
+//   */
+//  def kuduForeachPartition[T](it: Iterator[T],
+//                                        f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
+//    f(it, KuduClientCache.getKuduClient(broadcastedKuduMaster.value),
+//    KuduClientCache.getAsyncKuduClient(broadcastedKuduMaster.value))
+//  }
 
   /**
    *  underlining wrapper all mapPartition functions in HBaseContext
@@ -296,6 +276,27 @@ object KuduContext {
                                 f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit): Unit = {
 
     dstream.foreachRDD(rdd => KuduContext.foreachPartition(context,rdd, f))
+  }
+ 
+    /**
+   * A simple enrichment of the traditional Spark Streaming dStream foreach
+   * This function differs from the original in that it offers the
+   * developer access to a already connected HConnection object
+   *
+   * Note: Do not close the HConnection object.  All HConnection
+   * management is handled outside this method
+   *
+   * @param dstream  Original DStream with data to iterate over
+   * @param f        Function to be given a iterator to iterate through
+   *                 the DStream values and a HConnection object to
+   *                 interact with HBase
+   */
+  def foreachDStreamPartition[T](context:KuduContext, 
+                          dstream: DStream[T],
+                          f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
+    dstream.foreachRDD((rdd, time) => {
+      KuduContext.foreachPartition(context,rdd,f)
+    })
   }
   
 }
