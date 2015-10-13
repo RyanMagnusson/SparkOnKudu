@@ -27,6 +27,7 @@ import scala.reflect.ClassTag
 import org.apache.spark.{Logging, SparkContext}
 import org.apache.spark.streaming.dstream.DStream
 import java.io._
+import org.apache.spark.broadcast.Broadcast
 
 /**
   * HBaseContext is a façade for HBase operations
@@ -37,31 +38,31 @@ import java.io._
   * to the working and managing the life cycle of HConnections.
  */
 class KuduContext(@transient sc: SparkContext,
-                   @transient kuduMaster: String)
+                  @transient kuduMaster: String)
   extends Serializable with Logging {
 
   val broadcastedKuduMaster = sc.broadcast(kuduMaster)
 
   LatestKuduContextCache.latest = this
 
-  /**
-   * A simple enrichment of the traditional Spark RDD foreachPartition.
-   * This function differs from the original in that it offers the
-   * developer access to a already connected HConnection object
-   *
-   * Note: Do not close the HConnection object.  All HConnection
-   * management is handled outside this method
-   *
-   * @param rdd  Original RDD with data to iterate over
-   * @param f    Function to be given a iterator to iterate through
-   *             the RDD values and a HConnection object to interact
-   *             with HBase
-   */
-  def foreachPartition[T](rdd: RDD[T],
-                          f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
-    rdd.foreachPartition(
-      it => kuduForeachPartition(it, f))
-  }
+//  /**
+//   * A simple enrichment of the traditional Spark RDD foreachPartition.
+//   * This function differs from the original in that it offers the
+//   * developer access to a already connected HConnection object
+//   *
+//   * Note: Do not close the HConnection object.  All HConnection
+//   * management is handled outside this method
+//   *
+//   * @param rdd  Original RDD with data to iterate over
+//   * @param f    Function to be given a iterator to iterate through
+//   *             the RDD values and a HConnection object to interact
+//   *             with HBase
+//   */
+//  def foreachPartition[T](rdd: RDD[T],
+//                          f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
+//    rdd.foreachPartition(
+//      it => KuduContext.broadcastedKuduForeachPartition(broadcastedKuduMaster, it, f))
+//  }
 
   /**
    * A simple enrichment of the traditional Spark Streaming dStream foreach
@@ -79,7 +80,7 @@ class KuduContext(@transient sc: SparkContext,
   def foreachPartition[T](dstream: DStream[T],
                     f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
     dstream.foreachRDD((rdd, time) => {
-      foreachPartition(rdd, f)
+      KuduContext.foreachPartition(broadcastedKuduMaster,rdd, f)
     })
   }
 
@@ -128,7 +129,7 @@ class KuduContext(@transient sc: SparkContext,
   def streamForeachPartition[T](dstream: DStream[T],
                                 f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit): Unit = {
 
-    dstream.foreachRDD(rdd => this.foreachPartition(rdd, f))
+    dstream.foreachRDD(rdd => KuduContext.foreachPartition(broadcastedKuduMaster,rdd, f))
   }
 
   /**
@@ -159,9 +160,6 @@ class KuduContext(@transient sc: SparkContext,
       f))
   }
 
-
-
-
   def kuduRDD(tableName: String, columnProjection: String = null):
   RDD[(NullWritable, RowResult)] = {
 
@@ -181,7 +179,7 @@ class KuduContext(@transient sc: SparkContext,
   /**
    *  underlining wrapper all foreach functions in HBaseContext
    */
-  private def kuduForeachPartition[T](it: Iterator[T],
+  def kuduForeachPartition[T](it: Iterator[T],
                                         f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
     f(it, KuduClientCache.getKuduClient(broadcastedKuduMaster.value),
     KuduClientCache.getAsyncKuduClient(broadcastedKuduMaster.value))
@@ -194,8 +192,6 @@ class KuduContext(@transient sc: SparkContext,
   private def kuduMapPartition[K, U](it: Iterator[K],
                                      mp: (Iterator[K], KuduClient, AsyncKuduClient) =>
                                          Iterator[U]): Iterator[U] = {
-
-    
     val res = mp(it,
       KuduClientCache.getKuduClient(broadcastedKuduMaster.value),
       KuduClientCache.getAsyncKuduClient(broadcastedKuduMaster.value))
@@ -244,6 +240,46 @@ class KuduContext(@transient sc: SparkContext,
   def fakeClassTag[T]: ClassTag[T] = ClassTag.AnyRef.asInstanceOf[ClassTag[T]]
 }
 
+object KuduContext {
+  /**
+   *  underlining wrapper all foreach functions in HBaseContext
+   */
+  def broadcastedKuduForeachIteratedPart[T](broadcastedKuduMaster:Broadcast[String], 
+                              it: Iterator[T],
+                              f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
+    val master = broadcastedKuduMaster.value
+    kuduForeachIteratedPart(master, it, f)
+  }
+  
+  def kuduForeachIteratedPart[T](kuduMaster:String, 
+                              it: Iterator[T],
+                              f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit) = {
+    f(it, KuduClientCache.getKuduClient(kuduMaster),
+    KuduClientCache.getAsyncKuduClient(kuduMaster))
+  }
+  
+    /**
+   * A simple enrichment of the traditional Spark RDD foreachPartition.
+   * This function differs from the original in that it offers the
+   * developer access to a already connected HConnection object
+   *
+   * Note: Do not close the HConnection object.  All HConnection
+   * management is handled outside this method
+   *
+   * @param rdd  Original RDD with data to iterate over
+   * @param f    Function to be given a iterator to iterate through
+   *             the RDD values and a HConnection object to interact
+   *             with HBase
+   */
+  def foreachPartition[T](broadcastedKuduMaster:Broadcast[String],
+                          rdd: RDD[T],
+                          f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit):Unit = {
+    rdd.foreachPartition(
+      it => KuduContext.broadcastedKuduForeachIteratedPart(broadcastedKuduMaster, it, f))
+  }
+}
+
+
 object LatestKuduContextCache {
   var latest:KuduContext = null
 }
@@ -271,3 +307,5 @@ object KuduClientCache {
   }
 
 }
+
+

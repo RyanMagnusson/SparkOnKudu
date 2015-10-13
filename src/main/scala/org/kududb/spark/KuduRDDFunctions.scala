@@ -36,7 +36,7 @@ object KuduRDDFunctions
    * @param rdd This is for rdd of any type
    * @tparam T  This is any type
    */
-  implicit class GenericHBaseRDDFunctions[T](val rdd: RDD[T]) {
+  implicit class GenericHBaseRDDFunctions[T](val rdd: RDD[T]) extends Serializable {
 
 
     /**
@@ -52,7 +52,7 @@ object KuduRDDFunctions
      */
     def hbaseForeachPartition(kc: KuduContext,
                               f: (Iterator[T], KuduClient, AsyncKuduClient) => Unit): Unit = {
-      kc.foreachPartition(rdd, f)
+      KuduContext.foreachPartition(kc.broadcastedKuduMaster,rdd, f)
     }
 
     /**
